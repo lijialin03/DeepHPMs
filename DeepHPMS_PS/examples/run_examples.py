@@ -1,11 +1,12 @@
 from example import Example
 
 
-lr = 0.001
-N_train = 100
+lr = 0.00001
+N_train = [10000, 300000, 30000]
 # max_grad == 3 or 4 is not supported by paddle now
 max_grad_dict = {"burgers": 2, "kdv": 3, "ks": 4}
-mode = ["load"]
+# mode = ["load_gen_pde","debug_gen_pde"]#, "debug_pinns", "save_pinns"]
+mode = ["load_gen_pde", "debug_pinns", "save_pinns"]
 example = Example()
 
 # # Burgers_Different_Swap
@@ -28,22 +29,22 @@ example = Example()
 #     "Burgers_Extrapolate",
 #     max_grad_dict["burgers"],
 #     lr,
-#     N_train,
-#     N_train,
-#     N_train,
+#     N_train[0],
+#     N_train[1],
+#     N_train[2],
 #     mode,
 # )
 
 # Burgers_Same
 example.run(
     "../../Data/burgers_sine.mat",
-    "../../Data/burgers_sine.mat",
+    "../../Data/burgers.mat",
     "Burgers",
     max_grad_dict["burgers"],
     lr,
-    N_train,
-    N_train,
-    N_train,
+    N_train[0],
+    N_train[1],
+    N_train[2],
     mode,
 )
 

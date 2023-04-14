@@ -78,7 +78,7 @@ class DeepHPM(object):
             )
             self.opt_pde = (
                 paddle.optimizer.Adam(
-                    learning_rate=lr, parameters=self.net_pde.parameters()
+                    learning_rate=0.00001, parameters=self.net_pde.parameters()
                 )
                 if self.net_pde is not None
                 else None
@@ -97,21 +97,25 @@ class DeepHPM(object):
     def train(self, N_iter, mode="idn"):
         """
         Args:
+            N_iter (int): number of iteration
             mode (str): idn/pde/sol
         """
         start_time = time.time()
         for iter in range(N_iter):
             if mode is "idn":
+                opt = self.opt_idn
                 u_pred_idn = self.forward_net_u(
                     self.t_idn, self.x_idn, self.lb_idn, self.ub_idn, self.net_idn
                 )[0]
                 losses = self.loss_fn(u_pred_idn - self.u_idn)
             elif mode is "pde":
+                opt = self.opt_pde
                 pde_pred = self.forward_net_f(
                     self.t_idn, self.x_idn, self.lb_idn, self.ub_idn, self.net_idn
                 )
                 losses = self.loss_fn(pde_pred)
             elif mode == "sol":
+                opt = self.opt_sol
                 self.u0_pred = self.forward_net_u(
                     self.t0_sol, self.x0_sol, self.lb_sol, self.ub_sol, self.net_sol
                 )[0]
@@ -130,26 +134,21 @@ class DeepHPM(object):
                 )
                 for i in range(self.max_grad):
                     losses += self.loss_fn(u_lb_pred_list[i] - u_ub_pred_list[i])
+
             if iter % 1000 == 0:
                 elapsed = time.time() - start_time
                 print("It: %d, Loss: %.3e, Time: %.2f" % (iter, losses, elapsed))
                 start_time = time.time()
+
             losses.backward()
-            if mode == "idn":
-                self.opt_idn.step()
-                self.opt_idn.clear_grad()
-            elif mode == "pde":
-                self.opt_pde.step()
-                self.opt_pde.clear_grad()
-            elif mode == "sol":
-                self.opt_sol.step()
-                self.opt_sol.clear_grad()
+            opt.step()
+            opt.clear_grad()
 
     def predict(self, t, x, mode):
         t = paddle.to_tensor(t, dtype="float32")
         x = paddle.to_tensor(x, dtype="float32")
 
-        if mode == "idn":
+        if mode in ["idn", "pde"]:
             lb = self.lb_idn
             ub = self.ub_idn
             net = self.net_idn
@@ -175,10 +174,12 @@ class DeepHPM(object):
         res = [u]
         grad = u
         for i in range(1, self.max_grad - 1):
-            new_grad = paddle.grad(grad, x, create_graph=True)[0]
+            if i < 2:
+                new_grad = paddle.grad(grad, x, create_graph=True)[0]
+            else:
+                new_grad = paddle.grad(grad, x, create_graph=False)[0]
             res.append(new_grad)
             grad = new_grad
-        res.append(paddle.grad(grad, x, create_graph=False)[0])
         return res
 
     def forward_net_f(self, t, x, lb, ub, net):
@@ -190,10 +191,12 @@ class DeepHPM(object):
         terms_list = [u]
         grad = u
         for i in range(1, self.max_grad):
-            new_grad = paddle.grad(grad, x, create_graph=True)[0]
+            if i < 2:
+                new_grad = paddle.grad(grad, x, create_graph=True)[0]
+            else:
+                new_grad = paddle.grad(grad, x, create_graph=False)[0]
             terms_list.append(new_grad)
             grad = new_grad
-        terms_list.append(paddle.grad(grad, x, create_graph=False)[0])
         terms = paddle.concat(terms_list, 1)
         f = u_t - self.forward_net_pde(terms)
         return f
@@ -208,18 +211,18 @@ class DeepHPM(object):
         elif mode == "sol":
             net = self.net_sol
             opt = self.opt_sol
-        paddle.save(net.state_dict(), path + mode + ".pdparams")
-        paddle.save(opt.state_dict(), path + mode + ".pdopt")
+        paddle.save(net.state_dict(), path + "_" + mode + ".pdparams")
+        paddle.save(opt.state_dict(), path + "_" + mode + ".pdopt")
 
     def load(self, path, mode="pde"):
-        net_path = path + mode + ".pdparams"
-        opt_path = path + mode + ".pdopt"
+        net_path = path + "_" + mode + ".pdparams"
+        opt_path = path + "_" + mode + ".pdopt"
         if not os.path.exists(net_path) or not os.path.exists(opt_path):
             sys.exit(
                 f"No {mode} model found in the path, "
                 "please check your path or swith to 'train' mode."
-                )
-        
+            )
+
         net_state_dict = paddle.load(net_path)
         opt_state_dict = paddle.load(opt_path)
         if mode == "idn":
@@ -231,3 +234,62 @@ class DeepHPM(object):
         elif mode == "sol":
             self.net_sol.set_state_dict(net_state_dict)
             self.opt_sol.set_state_dict(opt_state_dict)
+
+    def train_debug(self, N_iter, t, x, lb, ub, points, xi, mode="idn"):
+        """Predict and save plot every 1000 iters. Only avaliable for 'sol'.
+        Args:
+            N_iter (int): number of iteration
+            mode (str): idn/pde/sol
+        """
+        sys.path.append("../scripts/")
+        from plotting import Plotting
+
+        start_time = time.time()
+        for iter in range(N_iter):
+            if mode is "idn":
+                opt = self.opt_idn
+                u_pred_idn = self.forward_net_u(
+                    self.t_idn, self.x_idn, self.lb_idn, self.ub_idn, self.net_idn
+                )[0]
+                losses = self.loss_fn(u_pred_idn - self.u_idn)
+            elif mode is "pde":
+                opt = self.opt_pde
+                pde_pred = self.forward_net_f(
+                    self.t_idn, self.x_idn, self.lb_idn, self.ub_idn, self.net_idn
+                )
+                losses = self.loss_fn(pde_pred)
+            elif mode == "sol":
+                opt = self.opt_sol
+                self.u0_pred = self.forward_net_u(
+                    self.t0_sol, self.x0_sol, self.lb_sol, self.ub_sol, self.net_sol
+                )[0]
+                u_lb_pred_list = self.forward_net_u(
+                    self.t_lb_sol, self.x_lb_sol, self.lb_sol, self.ub_sol, self.net_sol
+                )
+                u_ub_pred_list = self.forward_net_u(
+                    self.t_ub_sol, self.x_ub_sol, self.lb_sol, self.ub_sol, self.net_sol
+                )
+                self.sol_f_pred = self.forward_net_f(
+                    self.t_f_sol, self.x_f_sol, self.lb_sol, self.ub_sol, self.net_sol
+                )
+
+                losses = self.loss_fn(self.u0_sol - self.u0_pred) + self.loss_fn(
+                    self.sol_f_pred
+                )
+                for i in range(self.max_grad):
+                    losses += self.loss_fn(u_lb_pred_list[i] - u_ub_pred_list[i])
+
+            # if iter < 10000:
+            #     opt.learning_rate = 0.001
+            if iter % 1000 == 0:
+                elapsed = time.time() - start_time
+                print("It: %d, Loss: %.3e, Time: %.2f" % (iter, losses, elapsed))
+                u_debug, _ = self.predict(t, x, mode)
+                # Plotting
+                plot = Plotting("iter_" + str(iter), lb, ub, points, xi)
+                plot.draw_debug(u_debug)
+                start_time = time.time()
+
+            losses.backward()
+            opt.step()
+            opt.clear_grad()

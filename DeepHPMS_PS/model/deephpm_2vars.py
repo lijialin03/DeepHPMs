@@ -13,12 +13,14 @@ class DeepHPM(object):
         self.opt_sol = None
         self.loss_fn = None
         self.max_grad = None
+        self.num_var = 1
 
     def init_idn(self, net_uv, t, x, vars, lb, ub) -> None:
         self.net_idn = net_uv
         self.t_idn = paddle.to_tensor(t, dtype="float32")
         self.x_idn = paddle.to_tensor(x, dtype="float32")
         self.vars_idn = paddle.to_tensor(vars, dtype="float32")
+        self.num_var = len(vars)
         self.lb_idn = paddle.to_tensor(lb, dtype="float32")
         self.ub_idn = paddle.to_tensor(ub, dtype="float32")
 
@@ -67,27 +69,27 @@ class DeepHPM(object):
 
     def compile(self, optimizer="adam", lr=None, loss="MSE", max_grad=2):
         if optimizer == "adam":
-            self.opt_idn = (
-                paddle.optimizer.Adam(
-                    learning_rate=lr, parameters=self.net_idn.parameters()
+            if self.net_idn is not []:
+                params = self.net_idn[0].parameters()
+                for i in range(1, self.num_var):
+                    params += self.net_idn[i].parameters()
+                self.opt_idn = paddle.optimizer.Adam(
+                    learning_rate=lr, parameters=params
                 )
-                if self.net_idn is not None
-                else None
-            )
-            self.opt_pde = (
-                paddle.optimizer.Adam(
-                    learning_rate=lr, parameters=self.net_pde.parameters()
+            if self.net_pde is not []:
+                params = self.net_pde[0].parameters()
+                for i in range(1, self.num_var):
+                    params += self.net_pde[i].parameters()
+                self.opt_pde = paddle.optimizer.Adam(
+                    learning_rate=lr, parameters=params
                 )
-                if self.net_pde is not None
-                else None
-            )
-            self.opt_sol = (
-                paddle.optimizer.Adam(
-                    learning_rate=lr, parameters=self.net_sol.parameters()
+            if self.net_sol is not []:
+                params = self.net_sol[0].parameters()
+                for i in range(1, self.num_var):
+                    params += self.net_sol[i].parameters()
+                self.opt_sol = paddle.optimizer.Adam(
+                    learning_rate=lr, parameters=params
                 )
-                if self.net_sol is not None
-                else None
-            )
         if loss == "MSE":
             self.loss_fn = self.mean_squared_error
         self.max_grad = max_grad
@@ -100,25 +102,24 @@ class DeepHPM(object):
         start_time = time.time()
         for iter in range(N_iter):
             if mode is "idn":
-                for i in range(2):
-                    vars_pred_idn = self.forward_net_u(
-                        self.t_idn, self.x_idn, self.lb_idn, self.ub_idn, self.net_idn
-                    )[0]
-                    error = vars_pred_idn - self.vars_idn
-                    losses = 0
-                    for e in error:
-                        losses += self.loss_fn(e)
+                vars_pred_idn = self.forward_net_u(
+                    self.t_idn, self.x_idn, self.lb_idn, self.ub_idn, self.net_idn
+                )  # [u,u_x,u_xx,...,v,v_x,v_xx,...]
+                losses = 0
+                for i in range(self.num_var):
+                    error = vars_pred_idn[i * self.max_grad] - self.vars_idn[i]
+                    losses += self.loss_fn(error)
             elif mode is "pde":
                 pde_pred = self.forward_net_f(
                     self.t_idn, self.x_idn, self.lb_idn, self.ub_idn, self.net_idn
                 )
                 losses = 0
-                for e in pde_pred:
-                    losses += self.loss_fn(e)
+                for error in pde_pred:
+                    losses += self.loss_fn(error)
             elif mode == "sol":
                 self.vars0_pred = self.forward_net_u(
                     self.t0_sol, self.x0_sol, self.lb_sol, self.ub_sol, self.net_sol
-                )[0]
+                )
                 vars_lb_pred_list = self.forward_net_u(
                     self.t_lb_sol, self.x_lb_sol, self.lb_sol, self.ub_sol, self.net_sol
                 )
@@ -128,14 +129,14 @@ class DeepHPM(object):
                 self.sol_pde_pred = self.forward_net_f(
                     self.t_f_sol, self.x_f_sol, self.lb_sol, self.ub_sol, self.net_sol
                 )
-                error = self.vars0_sol - self.vars0_pred
                 losses = 0
-                for i in range(len(error)):
-                    losses = self.loss_fn(error[i]) + self.loss_fn(self.sol_pde_pred[i])
-                for j in range(self.max_grad):
-                    for i in range(len(error)):
+                for i in range(self.num_var):
+                    error = self.vars0_sol[i] - self.vars0_pred[i * self.max_grad]
+                    losses += self.loss_fn(error) + self.loss_fn(self.sol_pde_pred[i])
+                    for j in range(self.max_grad - 1):
                         losses += self.loss_fn(
-                            vars_lb_pred_list[j][i] - vars_ub_pred_list[j][i]
+                            vars_lb_pred_list[i * self.max_grad + j + 1]
+                            - vars_ub_pred_list[i * self.max_grad + j + 1]
                         )
             if iter % 1000 == 0:
                 elapsed = time.time() - start_time
@@ -165,13 +166,18 @@ class DeepHPM(object):
             ub = self.ub_sol
             net = self.net_sol
 
-        pred_vars = self.forward_net_u(t, x, lb, ub, net)[0]
-        pred_fg = self.forward_net_f(t, x, lb, ub, net)
-        return pred_vars.numpy(), pred_fg.numpy()
+        pred_u = self.forward_net_u(t, x, lb, ub, net)[0]
+        pred_f = self.forward_net_f(t, x, lb, ub, net)[0]
+        if self.num_var >= 2:
+            pred_v = self.forward_net_u(t, x, lb, ub, net)[self.max_grad]
+            pred_g = self.forward_net_f(t, x, lb, ub, net)[1]
+            return [pred_u.numpy(), pred_f.numpy(), pred_v.numpy(), pred_g.numpy()]
+
+        return [pred_u.numpy(), pred_f.numpy()]
 
     def forward_net_pde(self, terms):
         pde = []
-        for i in range(2):
+        for i in range(self.num_var):
             pde.append(self.net_pde[i].forward(terms))
         return pde
 
@@ -180,49 +186,68 @@ class DeepHPM(object):
         x.stop_gradient = False
         X = paddle.concat([t, x], axis=1)
         H = 2.0 * (X - lb) / (ub - lb) - 1.0
-        vars = []
-        for i in range(2):
-            vars.append(net[i].forward(H))
-        res = [vars]
-        grad = res[0]
-        for i in range(1, self.max_grad - 1):
-            new_grad = []
-            for j in range(len(grad)):
-                new_grad.append(paddle.grad(grad[j], x, create_graph=True)[0])
+        u = net[0].forward(H)
+        if self.num_var >= 2:
+            v = net[1].forward(H)
+
+        res = [u]
+        grad = u
+        for i in range(1, self.max_grad):
+            if i < 2:
+                new_grad = paddle.grad(grad, x, create_graph=True)[0]
+            else:
+                new_grad = paddle.grad(grad, x, create_graph=False)[0]
             res.append(new_grad)
             grad = new_grad
-        new_grad = []
-        for j in range(len(grad)):
-            new_grad.append(paddle.grad(grad[j], x, create_graph=False)[0])
-        res.append(new_grad)
+
+        if self.num_var >= 2:
+            res.append(v)
+            grad = v
+            for i in range(1, self.max_grad):
+                if i < 2:
+                    new_grad = paddle.grad(grad, x, create_graph=True)[0]
+                else:
+                    new_grad = paddle.grad(grad, x, create_graph=False)[0]
+                res.append(new_grad)
+                grad = new_grad
+
         return res
 
     def forward_net_f(self, t, x, lb, ub, net):
         t.stop_gradient = False
         x.stop_gradient = False
 
-        vars = self.forward_net_u(t, x, lb, ub, net)[0]
-        vars_t = []
-        for i in range(2):
-            vars_t.append(paddle.grad(vars[i], t, create_graph=True)[0])
-        terms_list = [vars]
-        grad = terms_list[0]
+        terms_list = []
+        vars = self.forward_net_u(t, x, lb, ub, net)
+        u = vars[0]
+        u_t = paddle.grad(u, t, create_graph=True)[0]
+        terms_list = [u]
+        grad = u
         for i in range(1, self.max_grad):
-            new_grad = []
-            for j in range(len(grad)):
-                new_grad.append(paddle.grad(grad[j], x, create_graph=True)[0])
+            new_grad = paddle.grad(grad, x, create_graph=True)[0]
             terms_list.append(new_grad)
             grad = new_grad
-        new_grad = []
-        for j in range(len(grad)):
-            new_grad.append(paddle.grad(grad[j], x, create_graph=False)[0])
-        terms_list.append(new_grad)
+        terms_list.append(paddle.grad(grad, x, create_graph=False)[0])
+
+        if self.num_var >= 2:
+            v = vars[self.max_grad]
+            v_t = paddle.grad(v, t, create_graph=True)[0]
+            terms_list.append(v)
+            grad = v
+            for i in range(1, self.max_grad):
+                new_grad = paddle.grad(grad, x, create_graph=True)[0]
+                terms_list.append(new_grad)
+                grad = new_grad
+            terms_list.append(paddle.grad(grad, x, create_graph=False)[0])
+
+        # terms_list [u,u_x,u_xx,...,v,v_x,v_xx,...]
         terms = paddle.concat(terms_list, 1)
-        pde = self.forward_net_pde(terms)
-        fg = []
-        for i in range(2):
-            fg.append(vars_t[i] - pde[i])
-        return fg
+        pdes = self.forward_net_pde(terms)
+        f = u_t - pdes[0]
+        if self.num_var >= 2:
+            g = v_t - pdes[1]
+            return [f, g]
+        return [f]
 
     def save(self, path, mode="pde"):
         if mode == "idn":
@@ -234,18 +259,24 @@ class DeepHPM(object):
         elif mode == "sol":
             net = self.net_sol
             opt = self.opt_sol
-        paddle.save(net.state_dict(), path + mode + ".pdparams")
+        for i in range(self.num_var):
+            paddle.save(net[i].state_dict(), path + mode + str(i) + ".pdparams")
         paddle.save(opt.state_dict(), path + mode + ".pdopt")
 
     def load(self, path, mode="pde"):
-        net_state_dict = paddle.load(path + mode + ".pdparams")
+        for i in range(self.num_var):
+            net_state_dict = paddle.load(path + mode + str(i) + ".pdparams")
+            if mode == "idn":
+                self.net_idn[i].set_state_dict(net_state_dict)
+            elif mode == "pde":
+                self.net_pde[i].set_state_dict(net_state_dict)
+            elif mode == "sol":
+                self.net_sol[i].set_state_dict(net_state_dict)
+
         opt_state_dict = paddle.load(path + mode + ".pdopt")
         if mode == "idn":
-            self.net_idn.set_state_dict(net_state_dict)
             self.opt_idn.set_state_dict(opt_state_dict)
         elif mode == "pde":
-            self.net_pde.set_state_dict(net_state_dict)
             self.opt_pde.set_state_dict(opt_state_dict)
         elif mode == "sol":
-            self.net_sol.set_state_dict(net_state_dict)
             self.opt_sol.set_state_dict(opt_state_dict)

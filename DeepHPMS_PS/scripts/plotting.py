@@ -1,15 +1,21 @@
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from scipy.interpolate import griddata
 
 
 class Plotting(object):
-    def __init__(self, figname, lb, ub) -> None:
+    def __init__(self, figname, lb, ub, points, xi) -> None:
         self.figname = figname
-        self.fig = plt.figure(figname, figsize=(15, 6))
-        self.gs = gridspec.GridSpec(1, 3)
+        self.fig = plt.figure(figname, figsize=(10, 6))
+        self.gs = gridspec.GridSpec(1, 2)
         self.lb = lb
         self.ub = ub
+        self.points = points
+        self.xi = xi
+
+    def grid_data(self, values):
+        return griddata(self.points, values.flatten(), self.xi, method="cubic")
 
     def draw_subplot(self, subfigname, figdata, loc):
         ax = plt.subplot(self.gs[:, loc])
@@ -30,12 +36,17 @@ class Plotting(object):
         ax.set_aspect("auto", "box")
         ax.set_title(subfigname, fontsize=10)
 
-    def draw_n_save(self, data_exact, data_pinns, data_learned):
+    def draw_n_save(self, data_exact, data_learned):
         self.gs.update(top=0.8, bottom=0.2, left=0.1, right=0.9, wspace=0.5)
         # Exact p(t,x,y)
         self.draw_subplot("Exact Dynamics", data_exact, loc=0)
-        # PINNs Predicted p(t,x,y)
-        self.draw_subplot("PINNs Learned Dynamics", data_pinns, loc=1)
         # Predicted p(t,x,y)
-        self.draw_subplot("Learned Dynamics", data_learned, loc=2)
+        self.draw_subplot("Learned Dynamics", self.grid_data(data_learned), loc=1)
         plt.savefig("../figures/" + self.figname)
+        plt.close()
+
+    def draw_debug(self, data_debug):
+        self.gs.update(top=0.8, bottom=0.2, left=0.1, right=0.9, wspace=0.5)
+        self.draw_subplot("Debug Dynamics", self.grid_data(data_debug), loc=0)
+        plt.savefig("../figures/debug/" + self.figname)
+        plt.close()
