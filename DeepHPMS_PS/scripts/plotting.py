@@ -50,3 +50,23 @@ class Plotting(object):
         self.draw_subplot("Debug Dynamics", self.grid_data(data_debug), loc=0)
         plt.savefig("../figures/debug/" + self.figname)
         plt.close()
+
+    def draw_t_2d(self, data_exact, data_t):
+        import numpy as np
+
+        nx, nt = np.shape(data_exact)
+        plt.plot(np.linspace(-8, 8, nx + 1)[:-1], data_exact[:, -1], label="exact")
+        plt.plot(
+            np.linspace(-8, 8, nx + 1)[:-1],
+            data_exact[:, int(nt / 2)],
+            label="exact_helf_t",
+        )
+        data_t = np.reshape(data_t, (nx, nt))
+        plt.plot(
+            np.linspace(-8, 8, nx + 1)[:-1],
+            data_t[:, int(nt / 2)],
+            label="learned_helf_t",
+        )
+        plt.plot(np.linspace(-8, 8, nx + 1)[:-1], data_t[:, -1], label="learned")
+        plt.legend(loc="right")
+        plt.savefig("../figures/debug/test_t_" + self.figname)

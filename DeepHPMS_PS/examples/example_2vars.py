@@ -92,14 +92,18 @@ class Example(object):
         error_u_identifier = np.linalg.norm(
             data.u_idn_star - pred_identifier[0], 2
         ) / np.linalg.norm(data.u_idn_star, 2)
-        error_f_identifier = np.linalg.norm(pred_identifier[1])
+        error_f_identifier = np.linalg.norm(pred_identifier[1]) / np.sqrt(
+            len(pred_identifier[1])
+        )
         print("Error u idn-idn: %e" % (error_u_identifier))
         print("Error f pde-idn: %e" % (error_f_identifier))
         if num_var == 2:
             error_v_identifier = np.linalg.norm(
                 data.v_idn_star - pred_identifier[2], 2
-            ) / np.linalg.norm(data.u_idn_star, 2)
-            error_g_identifier = np.linalg.norm(pred_identifier[3])
+            ) / np.linalg.norm(data.v_idn_star, 2)
+            error_g_identifier = np.linalg.norm(pred_identifier[3]) / np.sqrt(
+                len(pred_identifier[3])
+            )
             print("Error v idn-idn: %e" % (error_v_identifier))
             print("Error g pde-idn: %e" % (error_g_identifier))
 
@@ -128,14 +132,16 @@ class Example(object):
         )
         if num_var == 1:
             plot.draw_n_save(data.Exact_u_sol, pred_sol[0])
+            plot.draw_t_2d(data.Exact_u_sol, pred_sol[0])
         elif num_var == 2:
             UV_pred = np.sqrt(pred_sol[0] ** 2 + pred_sol[2] ** 2)
             plot.draw_n_save(data.Exact_uv_sol, UV_pred)
+            plot.draw_t_2d(data.Exact_uv_sol, UV_pred)
 
 
 if __name__ == "__main__":
-    lr = 0.0001
-    N_train = [2000, 2000, 10000]
+    lr = 0.00001
+    N_train = [100000, 300000, 10000]
     example = Example()
     # Schrodinger
     example.run(
@@ -149,10 +155,11 @@ if __name__ == "__main__":
         N_train[1],
         N_train[2],
         mode=[
+            "load_gen_pde",
             "train_gen_pde",
             "save_gen_pde",
-            "train_pinns",
-            "save_pinns",
+            # "train_pinns",
+            # "save_pinns",
         ],
     )
 

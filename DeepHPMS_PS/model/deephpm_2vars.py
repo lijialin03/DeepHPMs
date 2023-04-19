@@ -27,8 +27,8 @@ class DeepHPM(object):
     def init_pde(self, net_uv) -> None:
         self.net_pde = net_uv
 
-    def init_sol(self, net, tb, x0, vars0, lb, ub, X_f) -> None:
-        self.net_sol = net
+    def init_sol(self, net_uv, tb, x0, vars0, lb, ub, X_f) -> None:
+        self.net_sol = net_uv
 
         X0 = np.concatenate((0 * x0, x0), 1)  # (0, x0)
         X_lb = np.concatenate((tb, 0 * tb + lb[1]), 1)  # (tb, lb[1])
@@ -65,7 +65,9 @@ class DeepHPM(object):
         )  # Collocation Points (space)
 
     def mean_squared_error(self, error):
-        return paddle.sum(paddle.square(error))
+        mse_loss = paddle.nn.MSELoss(reduction="mean")
+        label = paddle.to_tensor(np.zeros(error.shape), dtype="float32")
+        return mse_loss(error, label)
 
     def compile(self, optimizer="adam", lr=None, loss="MSE", max_grad=2):
         if optimizer == "adam":

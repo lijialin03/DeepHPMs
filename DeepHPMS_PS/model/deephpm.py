@@ -65,7 +65,9 @@ class DeepHPM(object):
         )  # Collocation Points (space)
 
     def mean_squared_error(self, error):
-        return paddle.sum(paddle.square(error))
+        mse_loss = paddle.nn.MSELoss(reduction="mean")
+        label = paddle.to_tensor(np.zeros(error.shape), dtype="float32")
+        return mse_loss(error, label)
 
     def compile(self, optimizer="adam", lr=None, loss="MSE", max_grad=2):
         if optimizer == "adam":
@@ -78,7 +80,7 @@ class DeepHPM(object):
             )
             self.opt_pde = (
                 paddle.optimizer.Adam(
-                    learning_rate=0.00001, parameters=self.net_pde.parameters()
+                    learning_rate=lr, parameters=self.net_pde.parameters()
                 )
                 if self.net_pde is not None
                 else None
@@ -128,16 +130,22 @@ class DeepHPM(object):
                 self.sol_f_pred = self.forward_net_f(
                     self.t_f_sol, self.x_f_sol, self.lb_sol, self.ub_sol, self.net_sol
                 )
-
-                losses = self.loss_fn(self.u0_sol - self.u0_pred) + self.loss_fn(
-                    self.sol_f_pred
-                )
-                for i in range(self.max_grad):
-                    losses += self.loss_fn(u_lb_pred_list[i] - u_ub_pred_list[i])
-
+                loss0 = self.loss_fn(self.u0_sol - self.u0_pred)
+                loss1 = self.loss_fn(self.sol_f_pred)
+                loss2 = self.loss_fn(u_lb_pred_list[0] - u_ub_pred_list[0])
+                loss3 = self.loss_fn(u_lb_pred_list[1] - u_ub_pred_list[1])
+                losses = loss0 + loss1 + loss2 + loss3
+                # for i in range(self.max_grad):
+                #     losses += self.loss_fn(u_lb_pred_list[i] - u_ub_pred_list[i])
             if iter % 1000 == 0:
                 elapsed = time.time() - start_time
-                print("It: %d, Loss: %.3e, Time: %.2f" % (iter, losses, elapsed))
+                if mode == "sol":
+                    print(
+                        "It: %d, Loss: %.3e, Loss0: %.3e, Loss1: %.3e, Loss2: %.3e, Loss3: %.3e, Time: %.2f"
+                        % (iter, losses, loss0, loss1, loss2, loss3, elapsed)
+                    )
+                else:
+                    print("It: %d, Loss: %.3e, Time: %.2f" % (iter, losses, elapsed))
                 start_time = time.time()
 
             losses.backward()
@@ -163,6 +171,7 @@ class DeepHPM(object):
 
     def forward_net_pde(self, terms):
         pde = self.net_pde.forward(terms)
+        # pde = -0.5 * terms[0] * terms[1] + 0.1 * terms[2]
         return pde
 
     def forward_net_u(self, t, x, lb, ub, net):
@@ -173,7 +182,7 @@ class DeepHPM(object):
         u = net.forward(H)
         res = [u]
         grad = u
-        for i in range(1, self.max_grad - 1):
+        for i in range(1, self.max_grad):
             if i < 2:
                 new_grad = paddle.grad(grad, x, create_graph=True)[0]
             else:
@@ -190,7 +199,7 @@ class DeepHPM(object):
         u_t = paddle.grad(u, t, create_graph=True)[0]
         terms_list = [u]
         grad = u
-        for i in range(1, self.max_grad):
+        for i in range(1, self.max_grad + 1):
             if i < 2:
                 new_grad = paddle.grad(grad, x, create_graph=True)[0]
             else:
@@ -198,7 +207,8 @@ class DeepHPM(object):
             terms_list.append(new_grad)
             grad = new_grad
         terms = paddle.concat(terms_list, 1)
-        f = u_t - self.forward_net_pde(terms)
+        pde = self.forward_net_pde(terms)
+        f = u_t - pde
         return f
 
     def save(self, path, mode="pde"):
