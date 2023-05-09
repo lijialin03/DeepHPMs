@@ -2,6 +2,7 @@ import imp
 import numpy as np
 import scipy.io
 from scipy.stats import qmc
+from pyDOE import lhs
 from config import Config
 
 
@@ -128,10 +129,22 @@ class DataLoader(object):
         idx_t = np.random.choice(self.t_sol.shape[0], N_b, replace=False)
         self.tb_train = self.t_sol[idx_t, :]
 
-        # self.X_f_train = self.lb_sol + (self.ub_sol - self.lb_sol) * lhs(2, self.cfg.N_f)
-        sampler = qmc.LatinHypercube(d=2, seed=1)
+        # self.X_f_train = self.lb_sol + (self.ub_sol - self.lb_sol) * lhs(
+        #     2, self.cfg.N_f
+        # )
+        sampler = qmc.LatinHypercube(d=2)
         sample = sampler.random(self.cfg.N_f)
         self.X_f_train = qmc.scale(sample, self.lb_sol, self.ub_sol)
+        # print(self.X_f_train[:, 0:1])
+        # print(self.X_f_train[:, 1:2])
+
+        # Add some supervision point
+        idx_s = np.random.choice(
+            self.t_sol_star.shape[0], int(N0 * N_b * self.cfg.suv_ratio), replace=False
+        )
+        self.t_suv = self.t_sol_star[idx_s, :]
+        self.x_suv = self.x_sol_star[idx_s, :]
+        self.u_suv = self.u_sol_star[idx_s, :]
 
     def __call__(self, file_idn, file_sol):
         # set config

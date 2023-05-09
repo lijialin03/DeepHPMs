@@ -15,6 +15,7 @@ class DeepHPM(object):
         self.opt_sol = None
         self.loss_fn = None
         self.max_grad = None
+        self.opt_op = "adam"
 
     def init_idn(self, net, t, x, u, lb, ub) -> None:
         self.net_idn = net
@@ -27,67 +28,98 @@ class DeepHPM(object):
     def init_pde(self, net) -> None:
         self.net_pde = net
 
-    def init_sol(self, net, tb, x0, u0, lb, ub, X_f) -> None:
-        self.net_sol = net
+    def init_sol(self, net, tb, x0, u0, lb, ub, X_f, ts=None, xs=None, us=None) -> None:
+        self.net_sol = net if net is not None else self.net_idn  # net
+        self.lb_sol = paddle.to_tensor(lb, dtype="float32")
+        self.ub_sol = paddle.to_tensor(ub, dtype="float32")
 
         X0 = np.concatenate((0 * x0, x0), 1)  # (0, x0)
         X_lb = np.concatenate((tb, 0 * tb + lb[1]), 1)  # (tb, lb[1])
         X_ub = np.concatenate((tb, 0 * tb + ub[1]), 1)  # (tb, ub[1])
 
-        self.t0_sol = paddle.to_tensor(
-            X0[:, 0:1], dtype="float32"
-        )  # Initial Data (time)
-        self.x0_sol = paddle.to_tensor(
-            X0[:, 1:2], dtype="float32"
-        )  # Initial Data (space)
-        self.u0_sol = paddle.to_tensor(u0, dtype="float32")  # Boundary Data
-        self.X_f_sol = paddle.to_tensor(X_f, dtype="float32")  # Collocation Points
-        self.lb_sol = paddle.to_tensor(lb, dtype="float32")
-        self.ub_sol = paddle.to_tensor(ub, dtype="float32")
+        # Initial Data
+        self.t0_sol = paddle.to_tensor(X0[:, 0:1], dtype="float32")  # time
+        self.x0_sol = paddle.to_tensor(X0[:, 1:2], dtype="float32")  # space
+        self.u0_sol = paddle.to_tensor(u0, dtype="float32")
 
-        self.t_lb_sol = paddle.to_tensor(
-            X_lb[:, 0:1], dtype="float32"
-        )  # Boundary Data (time) -- lower boundary
-        self.t_ub_sol = paddle.to_tensor(
-            X_ub[:, 0:1], dtype="float32"
-        )  # Boundary Data (time) -- upper boundary
-        self.x_lb_sol = paddle.to_tensor(
-            X_lb[:, 1:2], dtype="float32"
-        )  # Boundary Data (space) -- lower boundary
-        self.x_ub_sol = paddle.to_tensor(
-            X_ub[:, 1:2], dtype="float32"
-        )  # Boundary Data (space) -- upper boundary
-        self.t_f_sol = paddle.to_tensor(
-            X_f[:, 0:1], dtype="float32"
-        )  # Collocation Points (time)
-        self.x_f_sol = paddle.to_tensor(
-            X_f[:, 1:2], dtype="float32"
-        )  # Collocation Points (space)
+        # Boundary Data
+        self.t_lb_sol = paddle.to_tensor(X_lb[:, 0:1], dtype="float32")  # time -- lb
+        self.t_ub_sol = paddle.to_tensor(X_ub[:, 0:1], dtype="float32")  # time -- ub
+        self.x_lb_sol = paddle.to_tensor(X_lb[:, 1:2], dtype="float32")  # space -- lb
+        self.x_ub_sol = paddle.to_tensor(X_ub[:, 1:2], dtype="float32")  # space -- ub
+
+        # Collocation Points
+        self.X_f_sol = paddle.to_tensor(X_f, dtype="float32")
+        self.t_f_sol = paddle.to_tensor(X_f[:, 0:1], dtype="float32")  # time
+        self.x_f_sol = paddle.to_tensor(X_f[:, 1:2], dtype="float32")  # space
+
+        # supervision points
+        self.has_suv_point = False
+        if ts is not None and xs is not None and us is not None:
+            self.t_s = paddle.to_tensor(ts, dtype="float32")
+            self.x_s = paddle.to_tensor(xs, dtype="float32")
+            self.u_s = paddle.to_tensor(us, dtype="float32")
+            self.has_suv_point = True
 
     def mean_squared_error(self, error):
-        mse_loss = paddle.nn.MSELoss(reduction="mean")
+        mse_loss = paddle.nn.loss.MSELoss(reduction="sum")
         label = paddle.to_tensor(np.zeros(error.shape), dtype="float32")
         return mse_loss(error, label)
 
-    def compile(self, optimizer="adam", lr=None, loss="MSE", max_grad=2):
+    def compile(self, optimizer="adam", lr=[0.01, 0.01, 0.01], loss="MSE", max_grad=2):
+        self.opt_op = optimizer
         if optimizer == "adam":
             self.opt_idn = (
                 paddle.optimizer.Adam(
-                    learning_rate=lr, parameters=self.net_idn.parameters()
+                    learning_rate=lr[0], parameters=self.net_idn.parameters()
                 )
                 if self.net_idn is not None
                 else None
             )
             self.opt_pde = (
                 paddle.optimizer.Adam(
-                    learning_rate=lr, parameters=self.net_pde.parameters()
+                    learning_rate=lr[1], parameters=self.net_pde.parameters()
                 )
                 if self.net_pde is not None
                 else None
             )
             self.opt_sol = (
                 paddle.optimizer.Adam(
-                    learning_rate=lr, parameters=self.net_sol.parameters()
+                    learning_rate=lr[2], parameters=self.net_sol.parameters()
+                )
+                if self.net_sol is not None
+                else None
+            )
+        elif optimizer == "lbfgs":
+            self.opt_idn = (
+                paddle.optimizer.LBFGS(
+                    # learning_rate=lr[0],
+                    # tolerance_grad=1e-16,
+                    # tolerance_change=0,
+                    line_search_fn="strong_wolfe",
+                    parameters=self.net_idn.parameters(),
+                )
+                if self.net_idn is not None
+                else None
+            )
+            self.opt_pde = (
+                paddle.optimizer.LBFGS(
+                    # learning_rate=lr[1],
+                    # tolerance_grad=1e-16,
+                    # tolerance_change=0,
+                    line_search_fn="strong_wolfe",
+                    parameters=self.net_pde.parameters(),
+                )
+                if self.net_pde is not None
+                else None
+            )
+            self.opt_sol = (
+                paddle.optimizer.LBFGS(
+                    # learning_rate=lr[2],
+                    # tolerance_grad=1e-16,
+                    # tolerance_change=0,
+                    line_search_fn="strong_wolfe",
+                    parameters=self.net_sol.parameters(),
                 )
                 if self.net_sol is not None
                 else None
@@ -96,61 +128,114 @@ class DeepHPM(object):
             self.loss_fn = self.mean_squared_error
         self.max_grad = max_grad
 
-    def train(self, N_iter, mode="idn"):
+    def get_losses(self, mode):
+        losses_list = []
+        if mode is "idn":
+            u_pred_idn = self.forward_net_u(
+                self.t_idn, self.x_idn, self.lb_idn, self.ub_idn, self.net_idn
+            )[0]
+            losses = self.loss_fn(u_pred_idn - self.u_idn)
+        elif mode is "pde":
+            pde_pred = self.forward_net_f(
+                self.t_idn, self.x_idn, self.lb_idn, self.ub_idn, self.net_idn
+            )
+            losses = self.loss_fn(pde_pred)
+        elif mode == "sol":
+            u0_pred = self.forward_net_u(
+                self.t0_sol, self.x0_sol, self.lb_sol, self.ub_sol, self.net_sol
+            )[0]
+            u_lb_pred_list = self.forward_net_u(
+                self.t_lb_sol, self.x_lb_sol, self.lb_sol, self.ub_sol, self.net_sol
+            )
+            u_ub_pred_list = self.forward_net_u(
+                self.t_ub_sol, self.x_ub_sol, self.lb_sol, self.ub_sol, self.net_sol
+            )
+            sol_f_pred = self.forward_net_f(
+                self.t_f_sol, self.x_f_sol, self.lb_sol, self.ub_sol, self.net_sol
+            )
+            loss0 = self.loss_fn(u0_pred - self.u0_sol)
+            loss1 = self.loss_fn(sol_f_pred)
+            losses = loss0 + loss1
+            # losses = loss1
+            losses_list = [loss0.item(), loss1.item()]
+            for i in range(self.max_grad):
+                loss_i = self.loss_fn(u_lb_pred_list[i] - u_ub_pred_list[i])
+                losses += loss_i
+                losses_list.append(loss_i.item())
+            # if self.has_suv_point:
+            #     u_suv = self.forward_net_u(
+            #         self.t_s, self.x_s, self.lb_sol, self.ub_sol, self.net_sol
+            #     )[0]
+            #     loss_suv = self.loss_fn(u_suv - self.u_s)
+            #     losses += loss_suv
+            #     losses_list.append(loss_suv.item())
+            # losses = loss0 + loss1
+        return losses, losses_list
+
+    def train_adam(self, N_iter, mode="idn"):
         """
         Args:
             N_iter (int): number of iteration
             mode (str): idn/pde/sol
         """
+        if mode == "idn":
+            opt = self.opt_idn
+        elif mode == "pde":
+            opt = self.opt_pde
+        elif mode == "sol":
+            opt = self.opt_sol
+
         start_time = time.time()
         for iter in range(N_iter):
-            if mode is "idn":
-                opt = self.opt_idn
-                u_pred_idn = self.forward_net_u(
-                    self.t_idn, self.x_idn, self.lb_idn, self.ub_idn, self.net_idn
-                )[0]
-                losses = self.loss_fn(u_pred_idn - self.u_idn)
-            elif mode is "pde":
-                opt = self.opt_pde
-                pde_pred = self.forward_net_f(
-                    self.t_idn, self.x_idn, self.lb_idn, self.ub_idn, self.net_idn
-                )
-                losses = self.loss_fn(pde_pred)
-            elif mode == "sol":
-                opt = self.opt_sol
-                self.u0_pred = self.forward_net_u(
-                    self.t0_sol, self.x0_sol, self.lb_sol, self.ub_sol, self.net_sol
-                )[0]
-                u_lb_pred_list = self.forward_net_u(
-                    self.t_lb_sol, self.x_lb_sol, self.lb_sol, self.ub_sol, self.net_sol
-                )
-                u_ub_pred_list = self.forward_net_u(
-                    self.t_ub_sol, self.x_ub_sol, self.lb_sol, self.ub_sol, self.net_sol
-                )
-                self.sol_f_pred = self.forward_net_f(
-                    self.t_f_sol, self.x_f_sol, self.lb_sol, self.ub_sol, self.net_sol
-                )
-                loss0 = self.loss_fn(self.u0_sol - self.u0_pred)
-                loss1 = self.loss_fn(self.sol_f_pred)
-                loss2 = self.loss_fn(u_lb_pred_list[0] - u_ub_pred_list[0])
-                loss3 = self.loss_fn(u_lb_pred_list[1] - u_ub_pred_list[1])
-                losses = loss0 + loss1 + loss2 + loss3
-                # for i in range(self.max_grad):
-                #     losses += self.loss_fn(u_lb_pred_list[i] - u_ub_pred_list[i])
+            losses, losses_list = self.get_losses(mode)
             if iter % 1000 == 0:
                 elapsed = time.time() - start_time
+                print(
+                    "It: %d, Time: %.2f, Loss: %.3e" % (iter, elapsed, losses), end=""
+                )
                 if mode == "sol":
-                    print(
-                        "It: %d, Loss: %.3e, Loss0: %.3e, Loss1: %.3e, Loss2: %.3e, Loss3: %.3e, Time: %.2f"
-                        % (iter, losses, loss0, loss1, loss2, loss3, elapsed)
-                    )
-                else:
-                    print("It: %d, Loss: %.3e, Time: %.2f" % (iter, losses, elapsed))
+                    for i in range(len(losses_list)):
+                        print(", Loss%d: %.3e" % (i, losses_list[i]), end="")
+                print("")
                 start_time = time.time()
 
             losses.backward()
             opt.step()
             opt.clear_grad()
+        return losses
+
+    def train_lbfgs(self, N_iter, mode="idn"):
+        self.iter = 0
+
+        def closure():
+            loss, _ = self.get_losses(mode)
+            opt.clear_grad()
+            loss.backward()
+            if self.iter % 1000 == 0:
+                print("It: %d, Loss: %.3e" % (self.iter, loss))
+                # for layer in self.net_sol.linears:
+                #     w, b = layer.weight, layer.bias
+                #     print("w,b :", w.mean(), b.mean())
+            self.iter += 1
+            return loss
+
+        if mode == "idn":
+            opt = self.opt_idn
+        elif mode == "pde":
+            opt = self.opt_pde
+        elif mode == "sol":
+            opt = self.opt_sol
+
+        opt.max_iter = N_iter
+        opt.max_eval = N_iter * 5 / 4
+        loss = opt.step(closure)
+        return loss
+
+    def train(self, N_iter=10000, mode="idn"):
+        if self.opt_op == "adam":
+            return self.train_adam(N_iter, mode)
+        elif self.opt_op == "lbfgs":
+            return self.train_lbfgs(N_iter, mode)
 
     def predict(self, t, x, mode):
         t = paddle.to_tensor(t, dtype="float32")
@@ -171,39 +256,34 @@ class DeepHPM(object):
 
     def forward_net_pde(self, terms):
         pde = self.net_pde.forward(terms)
-        # pde = -0.5 * terms[0] * terms[1] + 0.1 * terms[2]
         return pde
 
     def forward_net_u(self, t, x, lb, ub, net):
         t.stop_gradient = False
         x.stop_gradient = False
+        # lb.stop_gradient = True
+        # ub.stop_gradient = True
         X = paddle.concat([t, x], axis=1)
-        H = 2.0 * (X - lb) / (ub - lb) - 1.0
+        H = 2.0 * (X - lb) * paddle.pow((ub - lb), -1) - 1.0
         u = net.forward(H)
         res = [u]
         grad = u
-        for i in range(1, self.max_grad):
-            if i < 2:
-                new_grad = paddle.grad(grad, x, create_graph=True)[0]
-            else:
-                new_grad = paddle.grad(grad, x, create_graph=False)[0]
+        for _ in range(1, self.max_grad):
+            new_grad = paddle.grad(grad, x, create_graph=True)[0]
             res.append(new_grad)
             grad = new_grad
         return res
 
     def forward_net_f(self, t, x, lb, ub, net):
-        t.stop_gradient = False
-        x.stop_gradient = False
+        # t.stop_gradient = False
+        # x.stop_gradient = False
 
         u = self.forward_net_u(t, x, lb, ub, net)[0]
         u_t = paddle.grad(u, t, create_graph=True)[0]
         terms_list = [u]
         grad = u
-        for i in range(1, self.max_grad + 1):
-            if i < 2:
-                new_grad = paddle.grad(grad, x, create_graph=True)[0]
-            else:
-                new_grad = paddle.grad(grad, x, create_graph=False)[0]
+        for _ in range(1, self.max_grad + 1):
+            new_grad = paddle.grad(grad, x, create_graph=True)[0]
             terms_list.append(new_grad)
             grad = new_grad
         terms = paddle.concat(terms_list, 1)

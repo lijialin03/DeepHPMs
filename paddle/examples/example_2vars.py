@@ -67,13 +67,13 @@ class Example(object):
         )
         model.init_pde(net_pde)
         model.init_sol(
-            net_sol,
             data.tb_train,
             data.x0_train,
             data_u_train_sol,
             data.lb_sol,
             data.ub_sol,
             data.X_f_train,
+            net_sol,
         )
 
         # train idn and pde
@@ -92,14 +92,14 @@ class Example(object):
         error_u_identifier = np.linalg.norm(
             data.u_idn_star - pred_identifier[0], 2
         ) / np.linalg.norm(data.u_idn_star, 2)
-        error_f_identifier = np.linalg.norm(pred_identifier[1]) / np.sqrt(
-            len(pred_identifier[1])
+        error_f_identifier = np.linalg.norm(pred_identifier[2]) / np.sqrt(
+            len(pred_identifier[2])
         )
         print("Error u idn-idn: %e" % (error_u_identifier))
         print("Error f pde-idn: %e" % (error_f_identifier))
         if num_var == 2:
             error_v_identifier = np.linalg.norm(
-                data.v_idn_star - pred_identifier[2], 2
+                data.v_idn_star - pred_identifier[1], 2
             ) / np.linalg.norm(data.v_idn_star, 2)
             error_g_identifier = np.linalg.norm(pred_identifier[3]) / np.sqrt(
                 len(pred_identifier[3])
@@ -121,10 +121,17 @@ class Example(object):
         )
         print("Error u sol-sol: %e" % (error_u))
         if num_var == 2:
-            error_v = np.linalg.norm(data.v_sol_star - pred_sol[2], 2) / np.linalg.norm(
+            error_v = np.linalg.norm(data.v_sol_star - pred_sol[1], 2) / np.linalg.norm(
                 data.v_sol_star, 2
             )
             print("Error v sol-sol: %e" % (error_v))
+
+            uv_pred = np.sqrt(pred_sol[0] ** 2 + pred_sol[1] ** 2)
+            uv_sol_star = np.sqrt(data.u_sol_star**2 + data.v_sol_star**2)
+            error_uv = np.linalg.norm(uv_sol_star - uv_pred, 2) / np.linalg.norm(
+                uv_sol_star, 2
+            )
+            print("Error uv: %e" % (error_uv))
 
         # Plotting
         plot = Plotting(
@@ -134,20 +141,25 @@ class Example(object):
             plot.draw_n_save(data.Exact_u_sol, pred_sol[0])
             plot.draw_t_2d(data.Exact_u_sol, pred_sol[0])
         elif num_var == 2:
-            UV_pred = np.sqrt(pred_sol[0] ** 2 + pred_sol[2] ** 2)
+            UV_pred = np.sqrt(pred_sol[0] ** 2 + pred_sol[1] ** 2)
             plot.draw_n_save(data.Exact_uv_sol, UV_pred)
             plot.draw_t_2d(data.Exact_uv_sol, UV_pred)
 
 
 if __name__ == "__main__":
-    lr = 0.00001
-    N_train = [100000, 300000, 10000]
+    lr = [1e-4, 1e-4, 1e-4]
+    N_train = [50000, 50000, 100000]
     example = Example()
     # Schrodinger
+    import paddle
+
+    paddle.device.set_device("gpu:2")
+    paddle.fluid.core.set_prim_eager_enabled(True)
     example.run(
         "../../Data/NLS.mat",
         "../../Data/NLS.mat",
-        "NLS",
+        "NLS_normal",
+        # "NLS",
         2,
         2,
         lr,
@@ -156,10 +168,11 @@ if __name__ == "__main__":
         N_train[2],
         mode=[
             "load_gen_pde",
-            "train_gen_pde",
-            "save_gen_pde",
-            # "train_pinns",
-            # "save_pinns",
+            # "train_gen_pde",
+            # "save_gen_pde",
+            # "load_pinns",
+            "train_pinns",
+            "save_pinns",
         ],
     )
 

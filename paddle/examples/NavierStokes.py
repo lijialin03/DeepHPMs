@@ -61,58 +61,45 @@ class DeepHPM(object):
         self.net_pde = net
 
     def init_sol(self, t_b, x_b, y_b, w_b, t_f, x_f, y_f, u_f, v_f, net=None) -> None:
-        self.net_sol = self.net_idn  # net
+        self.net_sol = net if net is not None else self.net_idn  # net
 
-        # Training Data for Solution
-        self.t_b = paddle.to_tensor(
-            t_b, dtype="float32"
-        )  # initial and boundary data (time)
-        self.x_b = paddle.to_tensor(
-            x_b, dtype="float32"
-        )  # initial and boundary data (space - x)
-        self.y_b = paddle.to_tensor(
-            y_b, dtype="float32"
-        )  # initial and boundary data (space - y)
-        self.w_b = paddle.to_tensor(w_b, dtype="float32")  # boundary data (vorticity)
+        # Initial and Boundary Data (4 boundaries)
+        self.t_b = paddle.to_tensor(t_b, dtype="float32")  # time
+        self.x_b = paddle.to_tensor(x_b, dtype="float32")  # space - x
+        self.y_b = paddle.to_tensor(y_b, dtype="float32")  # space - y
+        self.w_b = paddle.to_tensor(w_b, dtype="float32")  # vorticity
 
-        self.t_f = paddle.to_tensor(t_f, dtype="float32")  # collocation points (time)
-        self.x_f = paddle.to_tensor(
-            x_f, dtype="float32"
-        )  # collocation points (space - x)
-        self.y_f = paddle.to_tensor(
-            y_f, dtype="float32"
-        )  # collocation points (space - y)
-        self.u_f = paddle.to_tensor(
-            u_f, dtype="float32"
-        )  # collocation points (space - u)
-        self.v_f = paddle.to_tensor(
-            v_f, dtype="float32"
-        )  # collocation points (space - v)
+        # Collocation Points
+        self.t_f = paddle.to_tensor(t_f, dtype="float32")  # time
+        self.x_f = paddle.to_tensor(x_f, dtype="float32")  # space - x
+        self.y_f = paddle.to_tensor(y_f, dtype="float32")  # space - y
+        self.u_f = paddle.to_tensor(u_f, dtype="float32")  # space - u
+        self.v_f = paddle.to_tensor(v_f, dtype="float32")  # space - v
 
     def mean_squared_error(self, error):
         mse_loss = paddle.nn.MSELoss(reduction="mean")
         label = paddle.to_tensor(np.zeros(error.shape), dtype="float32")
         return mse_loss(error, label)
 
-    def compile(self, optimizer="adam", lr=None, loss="MSE"):
+    def compile(self, optimizer="adam", lr=[0.01, 0.01, 0.01], loss="MSE"):
         if optimizer == "adam":
             self.opt_idn = (
                 paddle.optimizer.Adam(
-                    learning_rate=lr, parameters=self.net_idn.parameters()
+                    learning_rate=lr[0], parameters=self.net_idn.parameters()
                 )
                 if self.net_idn is not None
                 else None
             )
             self.opt_pde = (
                 paddle.optimizer.Adam(
-                    learning_rate=lr, parameters=self.net_pde.parameters()
+                    learning_rate=lr[1], parameters=self.net_pde.parameters()
                 )
                 if self.net_pde is not None
                 else None
             )
             self.opt_sol = (
                 paddle.optimizer.Adam(
-                    learning_rate=lr, parameters=self.net_sol.parameters()
+                    learning_rate=lr[2], parameters=self.net_sol.parameters()
                 )
                 if self.net_sol is not None
                 else None
@@ -157,11 +144,11 @@ class DeepHPM(object):
                     self.v_f,
                     self.net_sol,
                 )
-                losses = self.loss_fn(w_pred_sol) + self.loss_fn(f_pred_sol)
+                losses = self.loss_fn(self.w_b - w_pred_sol) + self.loss_fn(f_pred_sol)
 
             if iter % 1000 == 0:
                 elapsed = time.time() - start_time
-                print("It: %d, Loss: %.3e, Time: %.2f" % (iter, losses, elapsed))
+                print("It: %d, Time: %.2f, Loss: %.3e" % (iter, elapsed, losses))
                 start_time = time.time()
 
             losses.backward()
@@ -189,15 +176,17 @@ class DeepHPM(object):
         return pde
 
     def forward_net_w(self, t, x, y, net):
+        t.stop_gradient = False
+        x.stop_gradient = False
+        y.stop_gradient = False
         X = paddle.concat([t, x, y], axis=1)
         H = 2.0 * (X - self.lb) / (self.ub - self.lb) - 1.0
         w = net.forward(H)
         return w
 
     def forward_net_f(self, t, x, y, u, v, net):
-        t.stop_gradient = False
-        x.stop_gradient = False
-        y.stop_gradient = False
+        u.stop_gradient = False
+        v.stop_gradient = False
 
         w = self.forward_net_w(t, x, y, net)
 
@@ -206,10 +195,11 @@ class DeepHPM(object):
         w_x = paddle.grad(w, x, create_graph=True)[0]
         w_y = paddle.grad(w, y, create_graph=True)[0]
 
-        w_xx = paddle.grad(w_x, x, create_graph=False)[0]
-        w_xy = paddle.grad(w_x, y, create_graph=False)[0]
-        w_yy = paddle.grad(w_y, y, create_graph=False)[0]
+        w_xx = paddle.grad(w_x, x, create_graph=True)[0]
+        w_xy = paddle.grad(w_x, y, create_graph=True)[0]
+        w_yy = paddle.grad(w_y, y, create_graph=True)[0]
 
+        # terms = paddle.concat([w, w_x, w_y, w_xx, w_xy, w_yy], 1)
         terms = paddle.concat([u, v, w, w_x, w_y, w_xx, w_xy, w_yy], 1)
         f = w_t - self.net_pde(terms)
 
@@ -393,7 +383,7 @@ class Plotting(object):
         cax = divider.append_axes("right", size="5%", pad=0.05)
 
         self.fig.colorbar(h, cax=cax)
-        ax.axis("off")
+        # ax.axis("off")
         ax.set_xlabel("$t$")
         ax.set_ylabel("$x$")
         ax.set_aspect("auto", "box")
@@ -463,7 +453,7 @@ class Plotting(object):
         )
         plt.plot(np.linspace(-8, 8, nx + 1)[:-1], data_t[:, -1], label="learned")
         plt.legend(loc="right")
-        plt.savefig("../figures/debug/test_t")
+        plt.savefig("../figures/debug/test_t_" + self.figname)
 
 
 class Example(object):
@@ -539,8 +529,8 @@ class Example(object):
         w_pred_identifier = np.reshape(w_pred_identifier, (-1, 151))
         if "debug_gen_pde" in mode:
             plot.figname = figname + "_debug_NS_pde"
-            plot.draw_debug(w_pred_identifier)
             plot.draw_t_2d(data.w_data, w_pred_identifier)
+            plot.draw_n_save(data.w_data, w_pred_identifier)
         #    step = 71
         #    plot.plot_solution(data.X_data,w_pred_identifier[:,step],1)
         #    plot.plot_solution(data.X_data,data.w_data[:,step],2)
@@ -568,29 +558,35 @@ class Example(object):
 
         # Plotting
         plot.figname = figname
+        plot.draw_t_2d(data.w_data, w_pred)
         plot.draw_n_save(data.w_data, w_pred)
         plot.plot_vorticity(data.x_star, data.y_star)
 
 
 if __name__ == "__main__":
-    lr = 0.0001
-    N_train = [100000, 100000, 100000]
+    lr = [1e-4, 1e-4, 1e-4]
+    N_train = [50000, 50000, 50000]
     example = Example()
+    import paddle
+
+    paddle.device.set_device("gpu:1")
+    paddle.fluid.core.set_prim_eager_enabled(True)
     # NavierStokes
     example.run(
         "../../Data/cylinder.mat",
         "NavierStokes",
+        # "NavierStokes_normal",
         lr,
         N_train[0],
         N_train[1],
         N_train[2],
         mode=[
             "load_gen_pde",
-            "train_gen_pde",
-            "debug_gen_pde",
-            "save_gen_pde",
+            # "train_gen_pde",
+            # "debug_gen_pde",
+            # "save_gen_pde",
             # "load_pinns",
             "train_pinns",
-            "save_pinns",
+            # "save_pinns",
         ],
     )

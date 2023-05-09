@@ -1,3 +1,4 @@
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -36,6 +37,9 @@ class Plotting(object):
         ax.set_aspect("auto", "box")
         ax.set_title(subfigname, fontsize=10)
 
+        # line = np.linspace(self.lb[1], self.ub[1], 2)[:, None]
+        # ax.plot(t_idn[index] * np.ones((2, 1)), line, "w-", linewidth=1)
+
     def draw_n_save(self, data_exact, data_learned):
         self.gs.update(top=0.8, bottom=0.2, left=0.1, right=0.9, wspace=0.5)
         # Exact p(t,x,y)
@@ -70,3 +74,4 @@ class Plotting(object):
         plt.plot(np.linspace(-8, 8, nx + 1)[:-1], data_t[:, -1], label="learned")
         plt.legend(loc="right")
         plt.savefig("../figures/debug/test_t_" + self.figname)
+        plt.close()

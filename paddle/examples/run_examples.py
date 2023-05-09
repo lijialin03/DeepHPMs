@@ -1,59 +1,60 @@
 from example import Example
 
 
-lr = 0.0001
-N_train = [30000, 30000, 30000]
+lr = 0.00001
+N_train = [20000, 100000, 10000]
 # max_grad == 3 or 4 is not supported by paddle now
-max_grad_dict = {"burgers": 1, "kdv": 1, "ks": 1}
+max_grad_dict = {"burgers": 2, "kdv": 2, "ks": 4}
 mode = [
-    # "load_gen_pde",
-    "train_gen_pde",
+    "load_gen_pde",
+    # "train_gen_pde",
     # "debug_gen_pde",
     # "save_gen_pde",
+    "load_pinns",
     "train_pinns",
     # "debug_pinns",
-    # "save_pinns",
+    "save_pinns",
 ]
 example = Example()
 
-# Burgers_Different_Swap
-example.run(
-    "../../Data/burgers.mat",
-    "../../Data/burgers_sine.mat",
-    "Burgers_fail",
-    max_grad_dict["burgers"],
-    lr,
-    N_train[0],
-    N_train[1],
-    N_train[2],
-    mode,
-)
+# # Burgers_Different_Swap
+# example.run(
+#     "../../Data/burgers.mat",
+#     "../../Data/burgers_sine.mat",
+#     "Burgers_fail",
+#     max_grad_dict["burgers"],
+#     lr,
+#     N_train[0],
+#     N_train[1],
+#     N_train[2],
+#     mode,
+# )
 
-# Burgers_Different
-example.run(
-    "../../Data/burgers_sine.mat",
-    "../../Data/burgers.mat",
-    "Burgers_Extrapolate",
-    max_grad_dict["burgers"],
-    lr,
-    N_train[0],
-    N_train[1],
-    N_train[2],
-    mode,
-)
+# # Burgers_Different
+# example.run(
+#     "../../Data/burgers_sine.mat",
+#     "../../Data/burgers.mat",
+#     "Burgers_Extrapolate",
+#     max_grad_dict["burgers"],
+#     lr,
+#     N_train[0],
+#     N_train[1],
+#     N_train[2],
+#     mode,
+# )
 
-# Burgers_Same
-example.run(
-    "../../Data/burgers_sine.mat",
-    "../../Data/burgers_sine.mat",
-    "Burgers",
-    max_grad_dict["burgers"],
-    lr,
-    N_train[0],
-    N_train[1],
-    N_train[2],
-    mode,
-)
+# # Burgers_Same
+# example.run(
+#     "../../Data/burgers_sine.mat",
+#     "../../Data/burgers_sine.mat",
+#     "Burgers",
+#     max_grad_dict["burgers"],
+#     lr,
+#     N_train[0],
+#     N_train[1],
+#     N_train[2],
+#     mode,
+# )
 
 # # Kdv_Different
 # example.run(
@@ -68,18 +69,18 @@ example.run(
 #     mode,
 # )
 
-# # Kdv_Same
-# example.run(
-#     "../../Data/KdV_sine.mat",
-#     "../../Data/KdV_sine.mat",
-#     "KdV",
-#     max_grad_dict["kdv"],
-#     lr,
-#     N_train[0],
-#     N_train[1],
-#     N_train[2],
-#     mode,
-# )
+# Kdv_Same
+example.run(
+    "../../Data/KdV_sine.mat",
+    "../../Data/KdV_sine.mat",
+    "KdV",
+    max_grad_dict["kdv"],
+    lr,
+    N_train[0],
+    N_train[1],
+    N_train[2],
+    mode,
+)
 
 # # KS_chaotic
 # example.run(
