@@ -1,6 +1,8 @@
-# Deep Hidden Physics Models reproduce by Paddle
+# Deep Hidden Physics Models reproduce by Paddle and PaddleScience
 
-This project is a reproduction of DeepHPMS by paddle.
+This project is a reproduction of DeepHPMS by paddle and paddlescience.
+
+Formal codes of examples with PaddleScience will be merged in PaddleScience/examples/deephpms/(https://github.com/PaddlePaddle/PaddleScience), please see codes there.
 
 Visit following for more information about the original paper:(https://maziarraissi.github.io/DeepHPMs/)
 
